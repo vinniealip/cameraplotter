@@ -8,7 +8,7 @@ from typing import List, Optional
 import json
 import math
 import numpy as np
-from streamlit_drawable_canvas import st_canvas
+from streamlit.components.v1 import html
 
 @dataclass
 class Camera:
@@ -327,46 +327,75 @@ def main():
             display_image = plotter.render_image_with_cameras(st.session_state.uploaded_image)
             
             if st.session_state.drag_mode:
-                st.info("💡 **Drag Mode:** Click and drag any camera to move it to a new position!")
+                st.info("💡 **Drag Mode:** Use the interactive controls below to move cameras by clicking on the image or using the camera list in the sidebar.")
                 
-                # Use drawable canvas for drag functionality
-                canvas_result = st_canvas(
-                    fill_color="rgba(0, 0, 0, 0)",  # Transparent
-                    stroke_width=0,
-                    stroke_color="rgba(0, 0, 0, 0)",
-                    background_image=display_image,
-                    update_streamlit=True,
-                    width=display_image.width,
-                    height=display_image.height,
-                    drawing_mode="transform",  # This enables dragging
-                    point_display_radius=0,
-                    key="canvas_drag",
-                )
+                # Convert PIL image to base64 for HTML display
+                buffered = io.BytesIO()
+                display_image.save(buffered, format="PNG")
+                img_str = base64.b64encode(buffered.getvalue()).decode()
                 
-                # Handle canvas interactions
-                if canvas_result.json_data is not None:
-                    objects = canvas_result.json_data["objects"]
-                    if objects:
-                        # Check if any camera was moved
-                        for obj in objects:
-                            if "left" in obj and "top" in obj:
-                                # Find closest camera to the moved object
-                                moved_x = obj["left"]
-                                moved_y = obj["top"]
-                                
-                                # Find the camera that was likely moved
-                                closest_camera = None
-                                min_distance = float('inf')
-                                
-                                for camera in st.session_state.cameras:
-                                    distance = math.sqrt((camera.x - moved_x)**2 + (camera.y - moved_y)**2)
-                                    if distance < min_distance:
-                                        min_distance = distance
-                                        closest_camera = camera
-                                
-                                if closest_camera and min_distance > 30:  # Only update if significantly moved
-                                    plotter.update_camera_position(closest_camera.id, moved_x, moved_y)
-                                    st.rerun()
+                # Create interactive HTML with click detection
+                html_code = f"""
+                <div style="position: relative; display: inline-block; border: 2px solid #ddd; border-radius: 10px; overflow: hidden;">
+                    <img id="floorplan" src="data:image/png;base64,{img_str}" 
+                         style="max-width: 100%; height: auto; display: block;" 
+                         onclick="getClickCoordinates(event)" />
+                </div>
+                <script>
+                function getClickCoordinates(event) {{
+                    const rect = event.target.getBoundingClientRect();
+                    const scaleX = event.target.naturalWidth / rect.width;
+                    const scaleY = event.target.naturalHeight / rect.height;
+                    const x = Math.round((event.clientX - rect.left) * scaleX);
+                    const y = Math.round((event.clientY - rect.top) * scaleY);
+                    
+                    // Store coordinates in session storage for Streamlit to access
+                    sessionStorage.setItem('click_x', x);
+                    sessionStorage.setItem('click_y', y);
+                    
+                    // Show visual feedback
+                    const feedback = document.createElement('div');
+                    feedback.innerHTML = `📍 Clicked: (${{x}}, ${{y}})`;
+                    feedback.style.cssText = 'position:absolute;top:10px;left:10px;background:#ff6b6b;color:white;padding:5px 10px;border-radius:5px;font-size:12px;z-index:1000;';
+                    event.target.parentElement.appendChild(feedback);
+                    
+                    setTimeout(() => feedback.remove(), 2000);
+                    
+                    // Trigger a rerun by dispatching a custom event
+                    window.parent.postMessage({{type: 'camera_click', x: x, y: y}}, '*');
+                }}
+                </script>
+                """
+                
+                # Display the interactive image
+                html(html_code, height=int(display_image.height * 0.7))
+                
+                # Manual coordinate input as backup
+                st.subheader("Manual Camera Movement")
+                col_manual1, col_manual2 = st.columns(2)
+                with col_manual1:
+                    manual_x = st.number_input("Click X coordinate", value=0, key="manual_click_x")
+                with col_manual2:
+                    manual_y = st.number_input("Click Y coordinate", value=0, key="manual_click_y")
+                
+                if st.button("Move Nearest Camera Here", type="primary"):
+                    if st.session_state.cameras:
+                        # Find the camera closest to the clicked point
+                        closest_camera = None
+                        min_distance = float('inf')
+                        
+                        for camera in st.session_state.cameras:
+                            distance = math.sqrt((camera.x - manual_x)**2 + (camera.y - manual_y)**2)
+                            if distance < min_distance:
+                                min_distance = distance
+                                closest_camera = camera
+                        
+                        if closest_camera:
+                            plotter.update_camera_position(closest_camera.id, manual_x, manual_y)
+                            st.success(f"Moved Camera #{closest_camera.number} to ({manual_x}, {manual_y})")
+                            st.rerun()
+                    else:
+                        st.warning("No cameras to move!")
             else:
                 st.info("💡 **Place Mode:** Set coordinates in the sidebar and click 'Place Camera' button.")
                 st.image(display_image, use_column_width=True)
