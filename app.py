@@ -441,18 +441,16 @@ def main():
                     
                     // Show immediate feedback
                     const feedback = document.getElementById('feedback');
-                    feedback.innerHTML = `🎯 Moving camera to (${{x}}, ${{y}})`;
+                    feedback.innerHTML = `🎯 Clicked at (${{x}}, ${{y}}) - Use "Use Last Clicked Position" button below`;
                     feedback.style.display = 'block';
+                    setTimeout(() => feedback.style.display = 'none', 5000);
                     
-                    // Update URL parameters to trigger Streamlit update
+                    // Update URL parameters (no page reload)
                     const url = new URL(window.location);
                     url.searchParams.set('click_x', x);
                     url.searchParams.set('click_y', y);
                     url.searchParams.set('click_time', Date.now());
                     window.history.replaceState({{}}, '', url);
-                    
-                    // Immediately refresh to process the move
-                    window.location.reload();
                 }}
                 </script>
                 """
@@ -500,7 +498,31 @@ def main():
                                 st.rerun()
                         
                         st.markdown("---")
-                        st.info("💡 **Tip:** You can manually type coordinates above, or click on the floor plan to auto-fill them (coming soon!)")
+                        
+                        # Manual coordinate update from clicks
+                        col_update1, col_update2 = st.columns(2)
+                        with col_update1:
+                            if st.button("🎯 Use Last Clicked Position", help="Updates the coordinate fields with your last click on the floor plan"):
+                                # Get coordinates from URL parameters (set by JavaScript)
+                                clicked_x = st.query_params.get('click_x')
+                                clicked_y = st.query_params.get('click_y')
+                                
+                                if clicked_x and clicked_y:
+                                    st.session_state.auto_fill_x = int(float(clicked_x))
+                                    st.session_state.auto_fill_y = int(float(clicked_y))
+                                    st.success(f"✓ Updated coordinates to ({clicked_x}, {clicked_y})!")
+                                    st.query_params.clear()  # Clear after using
+                                    st.rerun()
+                                else:
+                                    st.warning("No click detected. Click on the floor plan first!")
+                        
+                        with col_update2:
+                            if st.button("📍 Reset to Current Position", help="Reset coordinates to camera's current position"):
+                                st.session_state.auto_fill_x = int(selected_camera.x)
+                                st.session_state.auto_fill_y = int(selected_camera.y)
+                                st.rerun()
+                        
+                        st.info("💡 **How to use:** 1) Click anywhere on the floor plan, 2) Click 'Use Last Clicked Position', 3) Click 'Move Camera Here!'")
                 
                 else:
                     st.warning("👆 Please select a camera from the sidebar first!")
