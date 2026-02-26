@@ -507,47 +507,37 @@ def main():
                         
                         st.markdown("---")
                         
-                        # Simple coordinate input method
-                        st.subheader("🎯 Quick Coordinate Input")
-                        st.info("💡 **Easy Method:** Click on the floor plan above to see coordinates in the popup, then type them below and click 'Copy Up' to fill the main inputs.")
+                        # Auto-refresh system to capture clicks
+                        st.subheader("🎯 Click-to-Auto-Fill")
+                        st.info("💡 **Simple Process:** 1) Click anywhere on the floor plan above, 2) Click 'Get Clicked Coordinates' below to auto-fill!")
                         
-                        col_manual1, col_manual2, col_manual3 = st.columns([2, 2, 1])
-                        with col_manual1:
-                            quick_x = st.number_input(
-                                "Quick X", 
-                                value=0,
-                                min_value=0,
-                                key="quick_x_input",
-                                help="Enter X coordinate you saw in the popup"
-                            )
-                        with col_manual2:
-                            quick_y = st.number_input(
-                                "Quick Y", 
-                                value=0,
-                                min_value=0,
-                                key="quick_y_input",
-                                help="Enter Y coordinate you saw in the popup"
-                            )
-                        with col_manual3:
-                            st.write("")
-                            st.write("")
-                            if st.button("⬆️ Copy Up", help="Copy these values to the main coordinate inputs above"):
+                        col_refresh, col_reset = st.columns(2)
+                        with col_refresh:
+                            if st.button("🎯 Get Clicked Coordinates", type="primary", help="Click this after clicking on the floor plan to auto-fill coordinates"):
+                                # Check URL parameters for coordinates
+                                clicked_x = st.query_params.get('click_x')
+                                clicked_y = st.query_params.get('click_y')
+                                
+                                if clicked_x and clicked_y:
+                                    coord_key = f"move_coords_{st.session_state.selected_for_move}"
+                                    st.session_state[coord_key] = {
+                                        'x': int(float(clicked_x)),
+                                        'y': int(float(clicked_y))
+                                    }
+                                    st.success(f"✓ Auto-filled coordinates to ({clicked_x}, {clicked_y})!")
+                                    st.query_params.clear()
+                                    st.rerun()
+                                else:
+                                    st.warning("👆 Click on the floor plan first, then click this button!")
+                        
+                        with col_reset:
+                            if st.button("📍 Reset Position", help="Reset coordinates to camera's current position"):
                                 coord_key = f"move_coords_{st.session_state.selected_for_move}"
                                 st.session_state[coord_key] = {
-                                    'x': quick_x,
-                                    'y': quick_y
+                                    'x': int(selected_camera.x),
+                                    'y': int(selected_camera.y)
                                 }
-                                st.success(f"✓ Copied ({quick_x}, {quick_y}) to main inputs!")
                                 st.rerun()
-                        
-                        # Reset button
-                        if st.button("📍 Reset to Current Position", help="Reset all coordinates to camera's current position"):
-                            coord_key = f"move_coords_{st.session_state.selected_for_move}"
-                            st.session_state[coord_key] = {
-                                'x': int(selected_camera.x),
-                                'y': int(selected_camera.y)
-                            }
-                            st.rerun()
                 
                 else:
                     st.warning("👆 Please select a camera from the sidebar first!")
