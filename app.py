@@ -445,12 +445,18 @@ def main():
                     feedback.style.display = 'block';
                     setTimeout(() => feedback.style.display = 'none', 5000);
                     
-                    // Update URL parameters (no page reload)
+                    // Store coordinates in multiple ways for reliability
+                    // Method 1: Update URL parameters
                     const url = new URL(window.location);
                     url.searchParams.set('click_x', x);
                     url.searchParams.set('click_y', y);
                     url.searchParams.set('click_time', Date.now());
                     window.history.replaceState({{}}, '', url);
+                    
+                    // Method 2: Store in sessionStorage (persistent across page interactions)
+                    sessionStorage.setItem('lastClickX', x);
+                    sessionStorage.setItem('lastClickY', y);
+                    sessionStorage.setItem('lastClickTime', Date.now());
                 }}
                 </script>
                 """
@@ -514,9 +520,12 @@ def main():
                         col_refresh, col_reset = st.columns(2)
                         with col_refresh:
                             if st.button("🎯 Get Clicked Coordinates", type="primary", help="Click this after clicking on the floor plan to auto-fill coordinates"):
-                                # Check URL parameters for coordinates
+                                # First check URL parameters
                                 clicked_x = st.query_params.get('click_x')
                                 clicked_y = st.query_params.get('click_y')
+                                
+                                # Debug information
+                                st.write(f"Debug URL params: x={clicked_x}, y={clicked_y}")
                                 
                                 if clicked_x and clicked_y:
                                     coord_key = f"move_coords_{st.session_state.selected_for_move}"
@@ -528,7 +537,32 @@ def main():
                                     st.query_params.clear()
                                     st.rerun()
                                 else:
-                                    st.warning("👆 Click on the floor plan first, then click this button!")
+                                    # Try to get coordinates using JavaScript from sessionStorage
+                                    js_get_coords = '''
+                                    <script>
+                                    const lastX = sessionStorage.getItem('lastClickX');
+                                    const lastY = sessionStorage.getItem('lastClickY');
+                                    const lastTime = sessionStorage.getItem('lastClickTime');
+                                    
+                                    if (lastX && lastY) {
+                                        // Update URL with stored coordinates
+                                        const url = new URL(window.location);
+                                        url.searchParams.set('click_x', lastX);
+                                        url.searchParams.set('click_y', lastY);
+                                        window.history.replaceState({}, '', url);
+                                        
+                                        // Show the coordinates for debugging
+                                        document.body.innerHTML += `<div style="position:fixed;top:10px;right:10px;background:green;color:white;padding:10px;z-index:9999;">Found coordinates: ${lastX}, ${lastY}<br>Time: ${lastTime}</div>`;
+                                        
+                                        // Force a page refresh to process them
+                                        setTimeout(() => window.location.reload(), 100);
+                                    } else {
+                                        document.body.innerHTML += `<div style="position:fixed;top:10px;right:10px;background:red;color:white;padding:10px;z-index:9999;">No coordinates found in session storage</div>`;
+                                    }
+                                    </script>
+                                    '''
+                                    html(js_get_coords, height=1)
+                                    st.warning("Trying to retrieve coordinates from session storage...")
                         
                         with col_reset:
                             if st.button("📍 Reset Position", help="Reset coordinates to camera's current position"):
