@@ -31,6 +31,8 @@ class CameraPlotter:
             st.session_state.drag_mode = False
         if 'selected_camera_id' not in st.session_state:
             st.session_state.selected_camera_id = None
+        if 'drag_update' not in st.session_state:
+            st.session_state.drag_update = None
     
     def add_camera(self, x: float, y: float, camera_type: str, number: int, angle: float = 0.0):
         camera = Camera(
@@ -170,13 +172,18 @@ class CameraPlotter:
                 draw.ellipse([x-10, y-5, x+10, y+5], fill='white')
                 draw.ellipse([x-4, y-2, x+4, y+2], fill='black')
             
-            # Draw camera number (larger font)
+            # Draw camera number (much larger font)
             try:
                 # Try to load a font, fall back to default if not available
-                font_size = 16
+                font_size = 32  # Much larger font
                 font = ImageFont.truetype("/System/Library/Fonts/Arial.ttf", font_size)
             except:
-                font = ImageFont.load_default()
+                try:
+                    # Try other common system fonts
+                    font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
+                except:
+                    # Fall back to default and hope for the best
+                    font = ImageFont.load_default()
             
             # Get text size for centering
             text = str(camera.number)
@@ -186,15 +193,19 @@ class CameraPlotter:
             
             # Draw text with background for better visibility
             text_x = x - text_width // 2
-            text_y = y - circle_radius - text_height - 5
+            text_y = y - circle_radius - text_height - 8
             
-            # Background rectangle for text
+            # Larger background rectangle for text
+            padding = 6
             draw.rectangle(
-                [text_x - 3, text_y - 2, text_x + text_width + 3, text_y + text_height + 2],
-                fill='white', outline='black', width=1
+                [text_x - padding, text_y - padding//2, text_x + text_width + padding, text_y + text_height + padding//2],
+                fill='white', outline='black', width=2
             )
             
-            # Draw the number
+            # Draw the number with bold effect (draw multiple times slightly offset)
+            for offset_x, offset_y in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
+                draw.text((text_x + offset_x, text_y + offset_y), text, fill='black', font=font)
+            # Final text on top
             draw.text((text_x, text_y), text, fill='black', font=font)
         
         return img_copy
@@ -327,75 +338,157 @@ def main():
             display_image = plotter.render_image_with_cameras(st.session_state.uploaded_image)
             
             if st.session_state.drag_mode:
-                st.info("💡 **Drag Mode:** Use the interactive controls below to move cameras by clicking on the image or using the camera list in the sidebar.")
+                st.info("🎆 **True Drag Mode:** Click and drag any camera to move it! No buttons needed!")
                 
                 # Convert PIL image to base64 for HTML display
                 buffered = io.BytesIO()
                 display_image.save(buffered, format="PNG")
                 img_str = base64.b64encode(buffered.getvalue()).decode()
                 
-                # Create interactive HTML with click detection
+                # Create cameras data for JavaScript
+                cameras_js = json.dumps([{
+                    'id': cam.id,
+                    'x': cam.x,
+                    'y': cam.y,
+                    'number': cam.number,
+                    'type': cam.camera_type
+                } for cam in st.session_state.cameras])
+                
+                # Create interactive HTML with true drag and drop
                 html_code = f"""
-                <div style="position: relative; display: inline-block; border: 2px solid #ddd; border-radius: 10px; overflow: hidden;">
-                    <img id="floorplan" src="data:image/png;base64,{img_str}" 
-                         style="max-width: 100%; height: auto; display: block;" 
-                         onclick="getClickCoordinates(event)" />
+                <div id="drag-container" style="position: relative; display: inline-block; border: 2px solid #4CAF50; border-radius: 10px; overflow: hidden; background: #f9f9f9;">
+                    <canvas id="floorplan-canvas" 
+                            style="display: block; cursor: grab; max-width: 100%; height: auto;"
+                            onmousedown="startDrag(event)"
+                            onmousemove="drag(event)"
+                            onmouseup="endDrag(event)"
+                            onmouseleave="endDrag(event)">
+                    </canvas>
+                    <div id="drag-feedback" style="position: absolute; top: 10px; left: 10px; background: rgba(76, 175, 80, 0.9); color: white; padding: 8px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; display: none; z-index: 1000;"></div>
                 </div>
+                
                 <script>
-                function getClickCoordinates(event) {{
-                    const rect = event.target.getBoundingClientRect();
-                    const scaleX = event.target.naturalWidth / rect.width;
-                    const scaleY = event.target.naturalHeight / rect.height;
-                    const x = Math.round((event.clientX - rect.left) * scaleX);
-                    const y = Math.round((event.clientY - rect.top) * scaleY);
+                let canvas, ctx, isDragging = false, dragCamera = null, dragOffset = {{x: 0, y: 0}};
+                let cameras = {cameras_js};
+                const img = new Image();
+                
+                function initCanvas() {{
+                    canvas = document.getElementById('floorplan-canvas');
+                    ctx = canvas.getContext('2d');
                     
-                    // Store coordinates in session storage for Streamlit to access
-                    sessionStorage.setItem('click_x', x);
-                    sessionStorage.setItem('click_y', y);
-                    
-                    // Show visual feedback
-                    const feedback = document.createElement('div');
-                    feedback.innerHTML = `📍 Clicked: (${{x}}, ${{y}})`;
-                    feedback.style.cssText = 'position:absolute;top:10px;left:10px;background:#ff6b6b;color:white;padding:5px 10px;border-radius:5px;font-size:12px;z-index:1000;';
-                    event.target.parentElement.appendChild(feedback);
-                    
-                    setTimeout(() => feedback.remove(), 2000);
-                    
-                    // Trigger a rerun by dispatching a custom event
-                    window.parent.postMessage({{type: 'camera_click', x: x, y: y}}, '*');
+                    img.onload = function() {{
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        drawFloorPlan();
+                    }};
+                    img.src = "data:image/png;base64,{img_str}";
                 }}
+                
+                function drawFloorPlan() {{
+                    // Clear and draw background image
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(img, 0, 0);
+                }}
+                
+                function getCameraAtPosition(x, y) {{
+                    for (let camera of cameras) {{
+                        const distance = Math.sqrt((camera.x - x) ** 2 + (camera.y - y) ** 2);
+                        if (distance <= 30) {{  // 30px click radius
+                            return camera;
+                        }}
+                    }}
+                    return null;
+                }}
+                
+                function startDrag(event) {{
+                    const rect = canvas.getBoundingClientRect();
+                    const scaleX = canvas.width / rect.width;
+                    const scaleY = canvas.height / rect.height;
+                    const x = (event.clientX - rect.left) * scaleX;
+                    const y = (event.clientY - rect.top) * scaleY;
+                    
+                    dragCamera = getCameraAtPosition(x, y);
+                    if (dragCamera) {{
+                        isDragging = true;
+                        dragOffset.x = x - dragCamera.x;
+                        dragOffset.y = y - dragCamera.y;
+                        canvas.style.cursor = 'grabbing';
+                        
+                        // Show feedback
+                        const feedback = document.getElementById('drag-feedback');
+                        feedback.innerHTML = `🎯 Dragging Camera #${{dragCamera.number}}`;
+                        feedback.style.display = 'block';
+                    }}
+                }}
+                
+                function drag(event) {{
+                    if (!isDragging || !dragCamera) return;
+                    
+                    const rect = canvas.getBoundingClientRect();
+                    const scaleX = canvas.width / rect.width;
+                    const scaleY = canvas.height / rect.height;
+                    const x = (event.clientX - rect.left) * scaleX;
+                    const y = (event.clientY - rect.top) * scaleY;
+                    
+                    // Update camera position
+                    dragCamera.x = Math.max(30, Math.min(canvas.width - 30, x - dragOffset.x));
+                    dragCamera.y = Math.max(30, Math.min(canvas.height - 30, y - dragOffset.y));
+                    
+                    // Redraw
+                    drawFloorPlan();
+                    
+                    // Update feedback
+                    const feedback = document.getElementById('drag-feedback');
+                    feedback.innerHTML = `🎯 Moving Camera #${{dragCamera.number}} to (${{Math.round(dragCamera.x)}}, ${{Math.round(dragCamera.y)}})`;
+                }}
+                
+                function endDrag(event) {{
+                    if (isDragging && dragCamera) {{
+                        // Send update to Streamlit
+                        const updateData = {{
+                            camera_id: dragCamera.id,
+                            new_x: Math.round(dragCamera.x),
+                            new_y: Math.round(dragCamera.y)
+                        }};
+                        
+                        // Use postMessage to communicate with Streamlit
+                        window.parent.postMessage({{
+                            type: 'camera_drag_update',
+                            data: updateData
+                        }}, '*');
+                        
+                        // Show success feedback
+                        const feedback = document.getElementById('drag-feedback');
+                        feedback.innerHTML = `✓ Moved Camera #${{dragCamera.number}}!`;
+                        feedback.style.background = 'rgba(76, 175, 80, 0.9)';
+                        setTimeout(() => {{
+                            feedback.style.display = 'none';
+                        }}, 2000);
+                    }}
+                    
+                    isDragging = false;
+                    dragCamera = null;
+                    canvas.style.cursor = 'grab';
+                }}
+                
+                // Initialize when page loads
+                initCanvas();
                 </script>
                 """
                 
-                # Display the interactive image
-                html(html_code, height=int(display_image.height * 0.7))
+                # Display the interactive canvas
+                html(html_code, height=int(display_image.height * 0.8))
                 
-                # Manual coordinate input as backup
-                st.subheader("Manual Camera Movement")
-                col_manual1, col_manual2 = st.columns(2)
-                with col_manual1:
-                    manual_x = st.number_input("Click X coordinate", value=0, key="manual_click_x")
-                with col_manual2:
-                    manual_y = st.number_input("Click Y coordinate", value=0, key="manual_click_y")
-                
-                if st.button("Move Nearest Camera Here", type="primary"):
-                    if st.session_state.cameras:
-                        # Find the camera closest to the clicked point
-                        closest_camera = None
-                        min_distance = float('inf')
-                        
-                        for camera in st.session_state.cameras:
-                            distance = math.sqrt((camera.x - manual_x)**2 + (camera.y - manual_y)**2)
-                            if distance < min_distance:
-                                min_distance = distance
-                                closest_camera = camera
-                        
-                        if closest_camera:
-                            plotter.update_camera_position(closest_camera.id, manual_x, manual_y)
-                            st.success(f"Moved Camera #{closest_camera.number} to ({manual_x}, {manual_y})")
-                            st.rerun()
-                    else:
-                        st.warning("No cameras to move!")
+                # Check for updates from JavaScript
+                drag_data = st.session_state.get('drag_update')
+                if drag_data:
+                    camera_id = drag_data['camera_id']
+                    new_x = drag_data['new_x']
+                    new_y = drag_data['new_y']
+                    plotter.update_camera_position(camera_id, new_x, new_y)
+                    st.session_state.drag_update = None  # Clear the update
+                    st.success(f"✓ Camera moved to ({new_x}, {new_y})!")
+                    st.rerun()
             else:
                 st.info("💡 **Place Mode:** Set coordinates in the sidebar and click 'Place Camera' button.")
                 st.image(display_image, use_column_width=True)
