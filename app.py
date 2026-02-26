@@ -33,6 +33,10 @@ class CameraPlotter:
             st.session_state.selected_camera_id = None
         if 'drag_update' not in st.session_state:
             st.session_state.drag_update = None
+        if 'move_mode' not in st.session_state:
+            st.session_state.move_mode = 'select'  # 'select' or 'place'
+        if 'selected_for_move' not in st.session_state:
+            st.session_state.selected_for_move = None
     
     def add_camera(self, x: float, y: float, camera_type: str, number: int, angle: float = 0.0):
         camera = Camera(
@@ -85,6 +89,24 @@ class CameraPlotter:
             'Facial Recognition': {'fill': (255, 50, 150), 'outline': (200, 0, 100), 'cone_color': (255, 100, 200, 100)}  # Pink
         }
         return styles.get(camera_type, {'fill': (255, 0, 0), 'outline': (150, 0, 0), 'cone_color': (255, 255, 0, 100)})
+    
+    def render_image_with_highlighted_camera(self, image: Image.Image, highlight_camera_id: int) -> Image.Image:
+        img_copy = self.render_image_with_cameras(image)
+        draw = ImageDraw.Draw(img_copy)
+        
+        # Find and highlight the selected camera
+        for camera in st.session_state.cameras:
+            if camera.id == highlight_camera_id:
+                x, y = camera.x, camera.y
+                # Draw a bright pulsing ring around selected camera
+                for radius in [35, 40, 45]:
+                    draw.ellipse(
+                        [x - radius, y - radius, x + radius, y + radius],
+                        outline=(255, 215, 0), width=3  # Gold highlight
+                    )
+                break
+        
+        return img_copy
     
     def render_image_with_cameras(self, image: Image.Image) -> Image.Image:
         img_copy = image.copy()
@@ -218,6 +240,31 @@ def main():
     
     plotter = CameraPlotter()
     
+    # Handle JavaScript communication for camera movement
+    if 'js_trigger' not in st.session_state:
+        st.session_state.js_trigger = 0
+    
+    # Check for camera selection/movement from JavaScript
+    if st.query_params.get('action') == 'select_camera':
+        camera_id = st.query_params.get('camera_id')
+        if camera_id:
+            st.session_state.selected_for_move = int(camera_id)
+            st.session_state.move_mode = 'place'
+            st.query_params.clear()
+            st.rerun()
+            
+    if st.query_params.get('action') == 'move_camera':
+        camera_id = st.query_params.get('camera_id')
+        new_x = st.query_params.get('x')
+        new_y = st.query_params.get('y')
+        if camera_id and new_x and new_y:
+            plotter.update_camera_position(int(camera_id), float(new_x), float(new_y))
+            st.session_state.selected_for_move = None
+            st.session_state.move_mode = 'select'
+            st.success(f"Camera moved to ({new_x}, {new_y})!")
+            st.query_params.clear()
+            st.rerun()
+    
     # Sidebar for controls
     with st.sidebar:
         st.header("Controls")
@@ -292,30 +339,69 @@ def main():
             for camera in st.session_state.cameras:
                 icon = plotter.get_camera_icon(camera.camera_type)
                 
-                with st.expander(f"{icon} Camera #{camera.number} ({camera.camera_type})"):
-                    st.caption(f"Position: ({int(camera.x)}, {int(camera.y)})")
+                # Special handling for drag mode
+                if st.session_state.drag_mode:
+                    is_selected = st.session_state.selected_for_move == camera.id
                     
-                    # Angle editing
-                    new_angle = st.slider(
-                        "Direction",
-                        min_value=0,
-                        max_value=359,
-                        value=int(camera.angle),
-                        key=f"angle_{camera.id}",
-                        help="0° = Right, 90° = Down, 180° = Left, 270° = Up"
-                    )
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button("Update Angle", key=f"update_{camera.id}"):
-                            plotter.update_camera_angle(camera.id, new_angle)
-                            st.success(f"Updated camera #{camera.number} angle to {new_angle}°")
-                            st.rerun()
-                    
-                    with col2:
-                        if st.button("🗑️ Delete", key=f"delete_{camera.id}"):
-                            plotter.remove_camera(camera.id)
-                            st.rerun()
+                    if is_selected:
+                        st.success(f"✓ **SELECTED:** {icon} Camera #{camera.number} ({camera.camera_type})")
+                        st.caption(f"Position: ({int(camera.x)}, {int(camera.y)}) | Angle: {int(camera.angle)}°")
+                        
+                        # Quick actions for selected camera
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button(f"Quick Move Camera #{camera.number}", key=f"quick_move_{camera.id}"):
+                                # Show coordinate inputs for quick movement
+                                new_x = st.number_input(f"New X for Camera #{camera.number}", value=int(camera.x), key=f"quick_x_{camera.id}")
+                                new_y = st.number_input(f"New Y for Camera #{camera.number}", value=int(camera.y), key=f"quick_y_{camera.id}")
+                                
+                                if st.button(f"Move to ({new_x}, {new_y})", key=f"confirm_move_{camera.id}"):
+                                    plotter.update_camera_position(camera.id, new_x, new_y)
+                                    st.success(f"Moved Camera #{camera.number}!")
+                                    st.session_state.selected_for_move = None
+                                    st.session_state.move_mode = 'select'
+                                    st.rerun()
+                        with col2:
+                            if st.button("Deselect", key=f"deselect_{camera.id}"):
+                                st.session_state.selected_for_move = None
+                                st.session_state.move_mode = 'select'
+                                st.rerun()
+                    else:
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            st.write(f"{icon} Camera #{camera.number} ({camera.camera_type})")
+                            st.caption(f"Position: ({int(camera.x)}, {int(camera.y)}) | Angle: {int(camera.angle)}°")
+                        with col2:
+                            if st.button("Select", key=f"select_{camera.id}"):
+                                st.session_state.selected_for_move = camera.id
+                                st.session_state.move_mode = 'place'
+                                st.rerun()
+                else:
+                    # Normal mode - full editor
+                    with st.expander(f"{icon} Camera #{camera.number} ({camera.camera_type})"):
+                        st.caption(f"Position: ({int(camera.x)}, {int(camera.y)})")
+                        
+                        # Angle editing
+                        new_angle = st.slider(
+                            "Direction",
+                            min_value=0,
+                            max_value=359,
+                            value=int(camera.angle),
+                            key=f"angle_{camera.id}",
+                            help="0° = Right, 90° = Down, 180° = Left, 270° = Up"
+                        )
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button("Update Angle", key=f"update_{camera.id}"):
+                                plotter.update_camera_angle(camera.id, new_angle)
+                                st.success(f"Updated camera #{camera.number} angle to {new_angle}°")
+                                st.rerun()
+                        
+                        with col2:
+                            if st.button("🗑️ Delete", key=f"delete_{camera.id}"):
+                                plotter.remove_camera(camera.id)
+                                st.rerun()
         else:
             st.info("No cameras placed yet")
         
@@ -334,11 +420,27 @@ def main():
         with col1:
             st.subheader("Floor Plan")
             
-            # Render image with cameras
-            display_image = plotter.render_image_with_cameras(st.session_state.uploaded_image)
+            # Render image with cameras (highlight selected camera)
+            if st.session_state.drag_mode and st.session_state.selected_for_move:
+                # Create a version with highlighted selected camera
+                display_image = plotter.render_image_with_highlighted_camera(
+                    st.session_state.uploaded_image, 
+                    st.session_state.selected_for_move
+                )
+            else:
+                display_image = plotter.render_image_with_cameras(st.session_state.uploaded_image)
             
             if st.session_state.drag_mode:
-                st.info("🎆 **True Drag Mode:** Click and drag any camera to move it! No buttons needed!")
+                if st.session_state.move_mode == 'select':
+                    if st.session_state.selected_for_move is None:
+                        st.info("🎯 **Step 1:** Click on a camera below to select it for moving")
+                    else:
+                        selected_cam = next((c for c in st.session_state.cameras if c.id == st.session_state.selected_for_move), None)
+                        if selected_cam:
+                            st.success(f"✓ **Step 2:** Camera #{selected_cam.number} selected! Now click where you want to move it.")
+                            st.session_state.move_mode = 'place'
+                else:  # move_mode == 'place'
+                    st.info("🎯 **Step 2:** Click anywhere on the image to move the selected camera there")
                 
                 # Convert PIL image to base64 for HTML display
                 buffered = io.BytesIO()
@@ -354,141 +456,90 @@ def main():
                     'type': cam.camera_type
                 } for cam in st.session_state.cameras])
                 
-                # Create interactive HTML with true drag and drop
+                move_mode_js = json.dumps(st.session_state.move_mode)
+                selected_id_js = json.dumps(st.session_state.selected_for_move)
+                
+                # Simple click-based movement system with form-based updates
                 html_code = f"""
-                <div id="drag-container" style="position: relative; display: inline-block; border: 2px solid #4CAF50; border-radius: 10px; overflow: hidden; background: #f9f9f9;">
-                    <canvas id="floorplan-canvas" 
-                            style="display: block; cursor: grab; max-width: 100%; height: auto;"
-                            onmousedown="startDrag(event)"
-                            onmousemove="drag(event)"
-                            onmouseup="endDrag(event)"
-                            onmouseleave="endDrag(event)">
-                    </canvas>
-                    <div id="drag-feedback" style="position: absolute; top: 10px; left: 10px; background: rgba(76, 175, 80, 0.9); color: white; padding: 8px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; display: none; z-index: 1000;"></div>
+                <div style="position: relative; display: inline-block; border: 2px solid #4CAF50; border-radius: 10px; overflow: hidden; background: #f9f9f9;">
+                    <img id="floorplan" src="data:image/png;base64,{img_str}" 
+                         style="max-width: 100%; height: auto; display: block; cursor: crosshair;" 
+                         onclick="handleImageClick(event)" />
+                    <div id="click-feedback" style="position: absolute; top: 10px; left: 10px; background: rgba(76, 175, 80, 0.9); color: white; padding: 8px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; display: none; z-index: 1000;"></div>
                 </div>
                 
+                <form id="hidden-form" method="GET" style="display: none;">
+                    <input type="hidden" id="action-input" name="action" value="">
+                    <input type="hidden" id="camera-id-input" name="camera_id" value="">
+                    <input type="hidden" id="x-input" name="x" value="">
+                    <input type="hidden" id="y-input" name="y" value="">
+                </form>
+                
                 <script>
-                let canvas, ctx, isDragging = false, dragCamera = null, dragOffset = {{x: 0, y: 0}};
-                let cameras = {cameras_js};
-                const img = new Image();
+                const cameras = {cameras_js};
+                const moveMode = {move_mode_js};
+                const selectedId = {selected_id_js};
                 
-                function initCanvas() {{
-                    canvas = document.getElementById('floorplan-canvas');
-                    ctx = canvas.getContext('2d');
+                function handleImageClick(event) {{
+                    const rect = event.target.getBoundingClientRect();
+                    const scaleX = event.target.naturalWidth / rect.width;
+                    const scaleY = event.target.naturalHeight / rect.height;
+                    const x = Math.round((event.clientX - rect.left) * scaleX);
+                    const y = Math.round((event.clientY - rect.top) * scaleY);
                     
-                    img.onload = function() {{
-                        canvas.width = img.width;
-                        canvas.height = img.height;
-                        drawFloorPlan();
-                    }};
-                    img.src = "data:image/png;base64,{img_str}";
-                }}
-                
-                function drawFloorPlan() {{
-                    // Clear and draw background image
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-                    ctx.drawImage(img, 0, 0);
-                }}
-                
-                function getCameraAtPosition(x, y) {{
-                    for (let camera of cameras) {{
-                        const distance = Math.sqrt((camera.x - x) ** 2 + (camera.y - y) ** 2);
-                        if (distance <= 30) {{  // 30px click radius
-                            return camera;
+                    const feedback = document.getElementById('click-feedback');
+                    
+                    if (moveMode === 'select') {{
+                        // Find camera at click position
+                        let clickedCamera = null;
+                        for (let camera of cameras) {{
+                            const distance = Math.sqrt((camera.x - x) ** 2 + (camera.y - y) ** 2);
+                            if (distance <= 35) {{
+                                clickedCamera = camera;
+                                break;
+                            }}
                         }}
-                    }}
-                    return null;
-                }}
-                
-                function startDrag(event) {{
-                    const rect = canvas.getBoundingClientRect();
-                    const scaleX = canvas.width / rect.width;
-                    const scaleY = canvas.height / rect.height;
-                    const x = (event.clientX - rect.left) * scaleX;
-                    const y = (event.clientY - rect.top) * scaleY;
-                    
-                    dragCamera = getCameraAtPosition(x, y);
-                    if (dragCamera) {{
-                        isDragging = true;
-                        dragOffset.x = x - dragCamera.x;
-                        dragOffset.y = y - dragCamera.y;
-                        canvas.style.cursor = 'grabbing';
                         
-                        // Show feedback
-                        const feedback = document.getElementById('drag-feedback');
-                        feedback.innerHTML = `🎯 Dragging Camera #${{dragCamera.number}}`;
+                        if (clickedCamera) {{
+                            feedback.innerHTML = `✓ Selected Camera #${{clickedCamera.number}}`;
+                            feedback.style.background = 'rgba(76, 175, 80, 0.9)';
+                            feedback.style.display = 'block';
+                            
+                            // Submit form to trigger Streamlit update
+                            document.getElementById('action-input').value = 'select_camera';
+                            document.getElementById('camera-id-input').value = clickedCamera.id;
+                            document.getElementById('hidden-form').submit();
+                        }} else {{
+                            feedback.innerHTML = `⚠️ No camera found at this position`;
+                            feedback.style.background = 'rgba(255, 152, 0, 0.9)';
+                            feedback.style.display = 'block';
+                            setTimeout(() => feedback.style.display = 'none', 3000);
+                        }}
+                    }} else if (moveMode === 'place' && selectedId) {{
+                        feedback.innerHTML = `🎯 Moving camera to (${{x}}, ${{y}})`;
+                        feedback.style.background = 'rgba(33, 150, 243, 0.9)';
                         feedback.style.display = 'block';
+                        
+                        // Submit form to trigger Streamlit update
+                        document.getElementById('action-input').value = 'move_camera';
+                        document.getElementById('camera-id-input').value = selectedId;
+                        document.getElementById('x-input').value = x;
+                        document.getElementById('y-input').value = y;
+                        document.getElementById('hidden-form').submit();
                     }}
                 }}
-                
-                function drag(event) {{
-                    if (!isDragging || !dragCamera) return;
-                    
-                    const rect = canvas.getBoundingClientRect();
-                    const scaleX = canvas.width / rect.width;
-                    const scaleY = canvas.height / rect.height;
-                    const x = (event.clientX - rect.left) * scaleX;
-                    const y = (event.clientY - rect.top) * scaleY;
-                    
-                    // Update camera position
-                    dragCamera.x = Math.max(30, Math.min(canvas.width - 30, x - dragOffset.x));
-                    dragCamera.y = Math.max(30, Math.min(canvas.height - 30, y - dragOffset.y));
-                    
-                    // Redraw
-                    drawFloorPlan();
-                    
-                    // Update feedback
-                    const feedback = document.getElementById('drag-feedback');
-                    feedback.innerHTML = `🎯 Moving Camera #${{dragCamera.number}} to (${{Math.round(dragCamera.x)}}, ${{Math.round(dragCamera.y)}})`;
-                }}
-                
-                function endDrag(event) {{
-                    if (isDragging && dragCamera) {{
-                        // Send update to Streamlit
-                        const updateData = {{
-                            camera_id: dragCamera.id,
-                            new_x: Math.round(dragCamera.x),
-                            new_y: Math.round(dragCamera.y)
-                        }};
-                        
-                        // Use postMessage to communicate with Streamlit
-                        window.parent.postMessage({{
-                            type: 'camera_drag_update',
-                            data: updateData
-                        }}, '*');
-                        
-                        // Show success feedback
-                        const feedback = document.getElementById('drag-feedback');
-                        feedback.innerHTML = `✓ Moved Camera #${{dragCamera.number}}!`;
-                        feedback.style.background = 'rgba(76, 175, 80, 0.9)';
-                        setTimeout(() => {{
-                            feedback.style.display = 'none';
-                        }}, 2000);
-                    }}
-                    
-                    isDragging = false;
-                    dragCamera = null;
-                    canvas.style.cursor = 'grab';
-                }}
-                
-                // Initialize when page loads
-                initCanvas();
                 </script>
                 """
                 
-                # Display the interactive canvas
-                html(html_code, height=int(display_image.height * 0.8))
+                # Display the interactive image
+                html(html_code, height=int(display_image.height * 0.7))
                 
-                # Check for updates from JavaScript
-                drag_data = st.session_state.get('drag_update')
-                if drag_data:
-                    camera_id = drag_data['camera_id']
-                    new_x = drag_data['new_x']
-                    new_y = drag_data['new_y']
-                    plotter.update_camera_position(camera_id, new_x, new_y)
-                    st.session_state.drag_update = None  # Clear the update
-                    st.success(f"✓ Camera moved to ({new_x}, {new_y})!")
+                # Handle camera selection
+                if st.button("🔄 Reset Selection", help="Start over with camera selection"):
+                    st.session_state.selected_for_move = None
+                    st.session_state.move_mode = 'select'
                     st.rerun()
+                    
             else:
                 st.info("💡 **Place Mode:** Set coordinates in the sidebar and click 'Place Camera' button.")
                 st.image(display_image, use_column_width=True)
