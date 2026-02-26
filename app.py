@@ -439,24 +439,12 @@ def main():
                     const x = Math.round((event.clientX - rect.left) * scaleX);
                     const y = Math.round((event.clientY - rect.top) * scaleY);
                     
-                    // Show immediate feedback
+                    // Show immediate feedback with coordinates
                     const feedback = document.getElementById('feedback');
-                    feedback.innerHTML = `🎯 Clicked at (${{x}}, ${{y}}) - Use "Use Last Clicked Position" button below`;
+                    feedback.innerHTML = `🎯 Coordinates: X=${x}, Y=${y} - Copy these to the inputs below!`;
+                    feedback.style.background = 'rgba(76, 175, 80, 0.95)';
                     feedback.style.display = 'block';
-                    setTimeout(() => feedback.style.display = 'none', 5000);
-                    
-                    // Store coordinates in multiple ways for reliability
-                    // Method 1: Update URL parameters
-                    const url = new URL(window.location);
-                    url.searchParams.set('click_x', x);
-                    url.searchParams.set('click_y', y);
-                    url.searchParams.set('click_time', Date.now());
-                    window.history.replaceState({{}}, '', url);
-                    
-                    // Method 2: Store in sessionStorage (persistent across page interactions)
-                    sessionStorage.setItem('lastClickX', x);
-                    sessionStorage.setItem('lastClickY', y);
-                    sessionStorage.setItem('lastClickTime', Date.now());
+                    setTimeout(() => feedback.style.display = 'none', 8000); // Show longer
                 }}
                 </script>
                 """
@@ -511,61 +499,39 @@ def main():
                                 st.session_state.selected_for_move = None
                                 st.rerun()
                         
-                        st.markdown("---")
+                        # Simple manual coordinate system (no complex JavaScript)
+                        st.subheader("📍 Manual Coordinate Input")
+                        st.info("💡 **Easy:** Click on the floor plan above to see coordinates in the popup, then enter them below.")
                         
-                        # Auto-refresh system to capture clicks
-                        st.subheader("🎯 Click-to-Auto-Fill")
-                        st.info("💡 **Simple Process:** 1) Click anywhere on the floor plan above, 2) Click 'Get Clicked Coordinates' below to auto-fill!")
+                        col_manual1, col_manual2 = st.columns(2)
+                        with col_manual1:
+                            manual_x = st.number_input(
+                                "Enter X coordinate", 
+                                value=0,
+                                min_value=0,
+                                help="Copy the X coordinate from the popup when you click the floor plan"
+                            )
+                        with col_manual2:
+                            manual_y = st.number_input(
+                                "Enter Y coordinate", 
+                                value=0,
+                                min_value=0,
+                                help="Copy the Y coordinate from the popup when you click the floor plan"
+                            )
                         
-                        col_refresh, col_reset = st.columns(2)
-                        with col_refresh:
-                            if st.button("🎯 Get Clicked Coordinates", type="primary", help="Click this after clicking on the floor plan to auto-fill coordinates"):
-                                # First check URL parameters
-                                clicked_x = st.query_params.get('click_x')
-                                clicked_y = st.query_params.get('click_y')
-                                
-                                # Debug information
-                                st.write(f"Debug URL params: x={clicked_x}, y={clicked_y}")
-                                
-                                if clicked_x and clicked_y:
-                                    coord_key = f"move_coords_{st.session_state.selected_for_move}"
-                                    st.session_state[coord_key] = {
-                                        'x': int(float(clicked_x)),
-                                        'y': int(float(clicked_y))
-                                    }
-                                    st.success(f"✓ Auto-filled coordinates to ({clicked_x}, {clicked_y})!")
-                                    st.query_params.clear()
-                                    st.rerun()
-                                else:
-                                    # Try to get coordinates using JavaScript from sessionStorage
-                                    js_get_coords = '''
-                                    <script>
-                                    const lastX = sessionStorage.getItem('lastClickX');
-                                    const lastY = sessionStorage.getItem('lastClickY');
-                                    const lastTime = sessionStorage.getItem('lastClickTime');
-                                    
-                                    if (lastX && lastY) {
-                                        // Update URL with stored coordinates
-                                        const url = new URL(window.location);
-                                        url.searchParams.set('click_x', lastX);
-                                        url.searchParams.set('click_y', lastY);
-                                        window.history.replaceState({}, '', url);
-                                        
-                                        // Show the coordinates for debugging
-                                        document.body.innerHTML += `<div style="position:fixed;top:10px;right:10px;background:green;color:white;padding:10px;z-index:9999;">Found coordinates: ${lastX}, ${lastY}<br>Time: ${lastTime}</div>`;
-                                        
-                                        // Force a page refresh to process them
-                                        setTimeout(() => window.location.reload(), 100);
-                                    } else {
-                                        document.body.innerHTML += `<div style="position:fixed;top:10px;right:10px;background:red;color:white;padding:10px;z-index:9999;">No coordinates found in session storage</div>`;
-                                    }
-                                    </script>
-                                    '''
-                                    html(js_get_coords, height=1)
-                                    st.warning("Trying to retrieve coordinates from session storage...")
+                        col_apply, col_reset = st.columns(2)
+                        with col_apply:
+                            if st.button("📍 Apply These Coordinates", type="primary"):
+                                coord_key = f"move_coords_{st.session_state.selected_for_move}"
+                                st.session_state[coord_key] = {
+                                    'x': manual_x,
+                                    'y': manual_y
+                                }
+                                st.success(f"✓ Updated main coordinates to ({manual_x}, {manual_y})!")
+                                st.rerun()
                         
                         with col_reset:
-                            if st.button("📍 Reset Position", help="Reset coordinates to camera's current position"):
+                            if st.button("🔄 Reset to Current", help="Reset coordinates to camera's current position"):
                                 coord_key = f"move_coords_{st.session_state.selected_for_move}"
                                 st.session_state[coord_key] = {
                                     'x': int(selected_camera.x),
