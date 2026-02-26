@@ -441,9 +441,8 @@ def main():
                     
                     // Show immediate feedback
                     const feedback = document.getElementById('feedback');
-                    feedback.innerHTML = `🎯 Clicked at (${{x}}, ${{y}})`;
+                    feedback.innerHTML = `🎯 Moving camera to (${{x}}, ${{y}})`;
                     feedback.style.display = 'block';
-                    setTimeout(() => feedback.style.display = 'none', 2000);
                     
                     // Update URL parameters to trigger Streamlit update
                     const url = new URL(window.location);
@@ -452,8 +451,8 @@ def main():
                     url.searchParams.set('click_time', Date.now());
                     window.history.replaceState({{}}, '', url);
                     
-                    // Force page refresh to trigger Streamlit update
-                    setTimeout(() => window.location.reload(), 100);
+                    // Immediately refresh to process the move
+                    window.location.reload();
                 }}
                 </script>
                 """
@@ -465,27 +464,42 @@ def main():
                 click_x = st.query_params.get('click_x')
                 click_y = st.query_params.get('click_y')
                 
+                # Debug information
+                if click_x and click_y:
+                    st.info(f"Debug: Detected click at ({click_x}, {click_y}). Selected camera: {st.session_state.selected_for_move}")
+                
                 if click_x and click_y and st.session_state.selected_for_move:
                     try:
                         x_coord = float(click_x)
                         y_coord = float(click_y)
+                        camera_id = st.session_state.selected_for_move
                         
-                        # Move the selected camera
-                        plotter.update_camera_position(st.session_state.selected_for_move, x_coord, y_coord)
+                        st.info(f"Debug: Attempting to move camera {camera_id} to ({x_coord}, {y_coord})")
                         
-                        # Find camera for success message
-                        moved_camera = next((c for c in st.session_state.cameras if c.id == st.session_state.selected_for_move), None)
-                        if moved_camera:
-                            st.success(f"✓ Moved Camera #{moved_camera.number} to ({int(x_coord)}, {int(y_coord)})!")
+                        # Find the camera before moving it
+                        camera_to_move = next((c for c in st.session_state.cameras if c.id == camera_id), None)
+                        if camera_to_move:
+                            st.info(f"Debug: Found camera #{camera_to_move.number} at current position ({camera_to_move.x}, {camera_to_move.y})")
+                            
+                            # Move the selected camera
+                            plotter.update_camera_position(camera_id, x_coord, y_coord)
+                            
+                            # Check if it actually moved
+                            updated_camera = next((c for c in st.session_state.cameras if c.id == camera_id), None)
+                            if updated_camera:
+                                st.success(f"✓ Camera #{updated_camera.number} moved from ({int(camera_to_move.x)}, {int(camera_to_move.y)}) to ({int(updated_camera.x)}, {int(updated_camera.y)})!")
+                            else:
+                                st.error("Camera not found after move attempt")
+                        else:
+                            st.error(f"Camera with ID {camera_id} not found")
                         
                         # Reset selection and clear URL params
                         st.session_state.selected_for_move = None
-                        st.session_state.move_mode = 'select'
                         st.query_params.clear()
                         st.rerun()
                         
-                    except ValueError:
-                        st.error("Invalid coordinates received")
+                    except ValueError as e:
+                        st.error(f"Invalid coordinates received: {e}")
                         st.query_params.clear()
                 
                 elif click_x and click_y and not st.session_state.selected_for_move:
