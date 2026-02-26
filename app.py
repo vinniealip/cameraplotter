@@ -441,7 +441,7 @@ def main():
                     
                     // Show immediate feedback with coordinates
                     const feedback = document.getElementById('feedback');
-                    feedback.innerHTML = `🎯 Coordinates: X=${x}, Y=${y} - Copy these to the inputs below!`;
+                    feedback.innerHTML = '🎯 Coordinates: X=' + x + ', Y=' + y + ' - Copy these to the inputs below!';
                     feedback.style.background = 'rgba(76, 175, 80, 0.95)';
                     feedback.style.display = 'block';
                     setTimeout(() => feedback.style.display = 'none', 8000); // Show longer
