@@ -9,6 +9,7 @@ import json
 import math
 import numpy as np
 from streamlit.components.v1 import html
+from components.drag_canvas import draggable_canvas
 
 @dataclass
 class Camera:
@@ -306,10 +307,10 @@ def main():
         # Mode selection
         mode = st.radio(
             "Interaction Mode",
-            ["Place New Camera", "Drag to Move Camera"],
-            help="Choose whether to place new cameras or drag existing ones to move them"
+            ["Place New Camera", "🎯 Real Drag & Drop"],
+            help="Choose whether to place new cameras or use true drag & drop to move them"
         )
-        st.session_state.drag_mode = (mode == "Drag to Move Camera")
+        st.session_state.drag_mode = (mode == "🎯 Real Drag & Drop")
         
         if not st.session_state.drag_mode:
             # Coordinates input for placing new cameras
@@ -431,114 +432,31 @@ def main():
                 display_image = plotter.render_image_with_cameras(st.session_state.uploaded_image)
             
             if st.session_state.drag_mode:
-                if st.session_state.move_mode == 'select':
-                    if st.session_state.selected_for_move is None:
-                        st.info("🎯 **Step 1:** Click on a camera below to select it for moving")
-                    else:
-                        selected_cam = next((c for c in st.session_state.cameras if c.id == st.session_state.selected_for_move), None)
-                        if selected_cam:
-                            st.success(f"✓ **Step 2:** Camera #{selected_cam.number} selected! Now click where you want to move it.")
-                            st.session_state.move_mode = 'place'
-                else:  # move_mode == 'place'
-                    st.info("🎯 **Step 2:** Click anywhere on the image to move the selected camera there")
+                st.info("🎆 **True Drag Mode:** Click and drag any camera to move it instantly!")
                 
-                # Convert PIL image to base64 for HTML display
-                buffered = io.BytesIO()
-                display_image.save(buffered, format="PNG")
-                img_str = base64.b64encode(buffered.getvalue()).decode()
+                # Use the custom draggable canvas component
+                drag_result = draggable_canvas(
+                    image=display_image,
+                    cameras=st.session_state.cameras,
+                    key="drag_canvas"
+                )
                 
-                # Create cameras data for JavaScript
-                cameras_js = json.dumps([{
-                    'id': cam.id,
-                    'x': cam.x,
-                    'y': cam.y,
-                    'number': cam.number,
-                    'type': cam.camera_type
-                } for cam in st.session_state.cameras])
-                
-                move_mode_js = json.dumps(st.session_state.move_mode)
-                selected_id_js = json.dumps(st.session_state.selected_for_move)
-                
-                # Simple click-based movement system with form-based updates
-                html_code = f"""
-                <div style="position: relative; display: inline-block; border: 2px solid #4CAF50; border-radius: 10px; overflow: hidden; background: #f9f9f9;">
-                    <img id="floorplan" src="data:image/png;base64,{img_str}" 
-                         style="max-width: 100%; height: auto; display: block; cursor: crosshair;" 
-                         onclick="handleImageClick(event)" />
-                    <div id="click-feedback" style="position: absolute; top: 10px; left: 10px; background: rgba(76, 175, 80, 0.9); color: white; padding: 8px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; display: none; z-index: 1000;"></div>
-                </div>
-                
-                <form id="hidden-form" method="GET" style="display: none;">
-                    <input type="hidden" id="action-input" name="action" value="">
-                    <input type="hidden" id="camera-id-input" name="camera_id" value="">
-                    <input type="hidden" id="x-input" name="x" value="">
-                    <input type="hidden" id="y-input" name="y" value="">
-                </form>
-                
-                <script>
-                const cameras = {cameras_js};
-                const moveMode = {move_mode_js};
-                const selectedId = {selected_id_js};
-                
-                function handleImageClick(event) {{
-                    const rect = event.target.getBoundingClientRect();
-                    const scaleX = event.target.naturalWidth / rect.width;
-                    const scaleY = event.target.naturalHeight / rect.height;
-                    const x = Math.round((event.clientX - rect.left) * scaleX);
-                    const y = Math.round((event.clientY - rect.top) * scaleY);
-                    
-                    const feedback = document.getElementById('click-feedback');
-                    
-                    if (moveMode === 'select') {{
-                        // Find camera at click position
-                        let clickedCamera = null;
-                        for (let camera of cameras) {{
-                            const distance = Math.sqrt((camera.x - x) ** 2 + (camera.y - y) ** 2);
-                            if (distance <= 35) {{
-                                clickedCamera = camera;
-                                break;
-                            }}
-                        }}
+                # Handle drag results
+                if drag_result is not None and isinstance(drag_result, dict):
+                    if 'camera_id' in drag_result and 'x' in drag_result and 'y' in drag_result:
+                        camera_id = drag_result['camera_id']
+                        new_x = drag_result['x']
+                        new_y = drag_result['y']
                         
-                        if (clickedCamera) {{
-                            feedback.innerHTML = `✓ Selected Camera #${{clickedCamera.number}}`;
-                            feedback.style.background = 'rgba(76, 175, 80, 0.9)';
-                            feedback.style.display = 'block';
-                            
-                            // Submit form to trigger Streamlit update
-                            document.getElementById('action-input').value = 'select_camera';
-                            document.getElementById('camera-id-input').value = clickedCamera.id;
-                            document.getElementById('hidden-form').submit();
-                        }} else {{
-                            feedback.innerHTML = `⚠️ No camera found at this position`;
-                            feedback.style.background = 'rgba(255, 152, 0, 0.9)';
-                            feedback.style.display = 'block';
-                            setTimeout(() => feedback.style.display = 'none', 3000);
-                        }}
-                    }} else if (moveMode === 'place' && selectedId) {{
-                        feedback.innerHTML = `🎯 Moving camera to (${{x}}, ${{y}})`;
-                        feedback.style.background = 'rgba(33, 150, 243, 0.9)';
-                        feedback.style.display = 'block';
+                        # Update camera position
+                        plotter.update_camera_position(camera_id, new_x, new_y)
                         
-                        // Submit form to trigger Streamlit update
-                        document.getElementById('action-input').value = 'move_camera';
-                        document.getElementById('camera-id-input').value = selectedId;
-                        document.getElementById('x-input').value = x;
-                        document.getElementById('y-input').value = y;
-                        document.getElementById('hidden-form').submit();
-                    }}
-                }}
-                </script>
-                """
-                
-                # Display the interactive image
-                html(html_code, height=int(display_image.height * 0.7))
-                
-                # Handle camera selection
-                if st.button("🔄 Reset Selection", help="Start over with camera selection"):
-                    st.session_state.selected_for_move = None
-                    st.session_state.move_mode = 'select'
-                    st.rerun()
+                        # Find camera for success message
+                        moved_camera = next((c for c in st.session_state.cameras if c.id == camera_id), None)
+                        if moved_camera:
+                            st.success(f"✓ Moved Camera #{moved_camera.number} to ({new_x}, {new_y})!")
+                        
+                        st.rerun()
                     
             else:
                 st.info("💡 **Place Mode:** Set coordinates in the sidebar and click 'Place Camera' button.")
