@@ -1,12 +1,14 @@
 import streamlit as st
 import pandas as pd
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 import io
 import base64
 from dataclasses import dataclass
 from typing import List, Optional
 import json
 import math
+import numpy as np
+from streamlit_drawable_canvas import st_canvas
 
 @dataclass
 class Camera:
@@ -119,54 +121,81 @@ class CameraPlotter:
             center_y = y + cone_length * 0.8 * math.sin(angle_rad)
             draw.line([(x, y), (center_x, center_y)], fill=style['outline'], width=2)
             
-            # Draw camera shape based on type
-            circle_radius = 15
+            # Draw camera shape based on type (enlarged)
+            circle_radius = 25
             
             if camera.camera_type == 'PTZ':
-                # PTZ: Circle with crosshairs
+                # PTZ: Circle with crosshairs (enlarged)
                 draw.ellipse(
                     [x - circle_radius, y - circle_radius, x + circle_radius, y + circle_radius],
-                    fill=style['fill'], outline=style['outline'], width=2
+                    fill=style['fill'], outline=style['outline'], width=3
                 )
-                # Crosshairs
-                draw.line([(x-8, y), (x+8, y)], fill='white', width=2)
-                draw.line([(x, y-8), (x, y+8)], fill='white', width=2)
+                # Crosshairs (larger)
+                draw.line([(x-15, y), (x+15, y)], fill='white', width=3)
+                draw.line([(x, y-15), (x, y+15)], fill='white', width=3)
             
             elif camera.camera_type == 'Dome':
-                # Dome: Circle with dome pattern
+                # Dome: Circle with dome pattern (enlarged)
                 draw.ellipse(
                     [x - circle_radius, y - circle_radius, x + circle_radius, y + circle_radius],
-                    fill=style['fill'], outline=style['outline'], width=2
+                    fill=style['fill'], outline=style['outline'], width=3
                 )
-                # Dome lines
-                draw.arc([x-10, y-10, x+10, y+10], 0, 180, fill='white', width=2)
+                # Dome lines (larger)
+                draw.arc([x-18, y-18, x+18, y+18], 0, 180, fill='white', width=3)
+                draw.arc([x-12, y-12, x+12, y+12], 0, 180, fill='white', width=2)
                 draw.arc([x-6, y-6, x+6, y+6], 0, 180, fill='white', width=1)
             
             elif camera.camera_type == 'Bullet':
-                # Bullet: Rectangle shape
+                # Bullet: Rectangle shape (enlarged)
+                rect_width = circle_radius + 5
+                rect_height = circle_radius // 2 + 5
                 draw.rectangle(
-                    [x - circle_radius, y - circle_radius//2, x + circle_radius, y + circle_radius//2],
-                    fill=style['fill'], outline=style['outline'], width=2
+                    [x - rect_width, y - rect_height, x + rect_width, y + rect_height],
+                    fill=style['fill'], outline=style['outline'], width=3
                 )
-                # Lens circle
-                draw.ellipse([x+5, y-5, x+12, y+5], fill='black', outline='white')
+                # Lens circle (larger)
+                draw.ellipse([x+8, y-8, x+18, y+8], fill='black', outline='white', width=2)
             
             else:  # Facial Recognition
-                # FR: Hexagon shape
-                hex_size = circle_radius - 2
+                # FR: Hexagon shape (enlarged)
+                hex_size = circle_radius
                 hex_points = []
                 for i in range(6):
                     angle = i * math.pi / 3
                     hex_x = x + hex_size * math.cos(angle)
                     hex_y = y + hex_size * math.sin(angle)
                     hex_points.append((hex_x, hex_y))
-                draw.polygon(hex_points, fill=style['fill'], outline=style['outline'], width=2)
-                # Eye symbol
-                draw.ellipse([x-6, y-3, x+6, y+3], fill='white')
-                draw.ellipse([x-2, y-1, x+2, y+1], fill='black')
+                draw.polygon(hex_points, fill=style['fill'], outline=style['outline'], width=3)
+                # Eye symbol (larger)
+                draw.ellipse([x-10, y-5, x+10, y+5], fill='white')
+                draw.ellipse([x-4, y-2, x+4, y+2], fill='black')
             
-            # Draw camera number
-            draw.text((x - 5, y - 22), str(camera.number), fill='black', stroke_width=1, stroke_fill='white')
+            # Draw camera number (larger font)
+            try:
+                # Try to load a font, fall back to default if not available
+                font_size = 16
+                font = ImageFont.truetype("/System/Library/Fonts/Arial.ttf", font_size)
+            except:
+                font = ImageFont.load_default()
+            
+            # Get text size for centering
+            text = str(camera.number)
+            bbox = draw.textbbox((0, 0), text, font=font)
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
+            
+            # Draw text with background for better visibility
+            text_x = x - text_width // 2
+            text_y = y - circle_radius - text_height - 5
+            
+            # Background rectangle for text
+            draw.rectangle(
+                [text_x - 3, text_y - 2, text_x + text_width + 3, text_y + text_height + 2],
+                fill='white', outline='black', width=1
+            )
+            
+            # Draw the number
+            draw.text((text_x, text_y), text, fill='black', font=font)
         
         return img_copy
 
@@ -219,10 +248,10 @@ def main():
         # Mode selection
         mode = st.radio(
             "Interaction Mode",
-            ["Place New Camera", "Move Existing Camera"],
-            help="Choose whether to place new cameras or move existing ones"
+            ["Place New Camera", "Drag to Move Camera"],
+            help="Choose whether to place new cameras or drag existing ones to move them"
         )
-        st.session_state.drag_mode = (mode == "Move Existing Camera")
+        st.session_state.drag_mode = (mode == "Drag to Move Camera")
         
         if not st.session_state.drag_mode:
             # Coordinates input for placing new cameras
@@ -297,55 +326,109 @@ def main():
             # Render image with cameras
             display_image = plotter.render_image_with_cameras(st.session_state.uploaded_image)
             
-            # Display the image
-            st.image(display_image, use_column_width=True)
-            
-            # Manual coordinate input for camera placement/movement
             if st.session_state.drag_mode:
-                st.info("💡 **Move Mode:** Select a camera from the list below, then set new coordinates and click 'Move Camera'.")
+                st.info("💡 **Drag Mode:** Click and drag any camera to move it to a new position!")
                 
-                if st.session_state.cameras:
-                    # Camera selection dropdown for moving
-                    camera_options = [(f"Camera #{cam.number} ({cam.camera_type})", cam.id) 
-                                    for cam in st.session_state.cameras]
-                    
-                    selected_option = st.selectbox(
-                        "Select Camera to Move",
-                        options=[opt[0] for opt in camera_options],
-                        key="camera_select"
-                    )
-                    
-                    if selected_option:
-                        selected_camera_id = next(opt[1] for opt in camera_options if opt[0] == selected_option)
-                        selected_camera = next(cam for cam in st.session_state.cameras if cam.id == selected_camera_id)
-                        
-                        col_x, col_y = st.columns(2)
-                        with col_x:
-                            new_x = st.number_input(
-                                "New X Position", 
-                                value=float(selected_camera.x),
-                                key="move_x"
-                            )
-                        with col_y:
-                            new_y = st.number_input(
-                                "New Y Position", 
-                                value=float(selected_camera.y),
-                                key="move_y"
-                            )
-                        
-                        if st.button("Move Camera", type="primary"):
-                            plotter.update_camera_position(selected_camera_id, new_x, new_y)
-                            st.success(f"Moved Camera #{selected_camera.number} to ({int(new_x)}, {int(new_y)})")
-                            st.rerun()
+                # Use drawable canvas for drag functionality
+                canvas_result = st_canvas(
+                    fill_color="rgba(0, 0, 0, 0)",  # Transparent
+                    stroke_width=0,
+                    stroke_color="rgba(0, 0, 0, 0)",
+                    background_image=display_image,
+                    update_streamlit=True,
+                    width=display_image.width,
+                    height=display_image.height,
+                    drawing_mode="transform",  # This enables dragging
+                    point_display_radius=0,
+                    key="canvas_drag",
+                )
+                
+                # Handle canvas interactions
+                if canvas_result.json_data is not None:
+                    objects = canvas_result.json_data["objects"]
+                    if objects:
+                        # Check if any camera was moved
+                        for obj in objects:
+                            if "left" in obj and "top" in obj:
+                                # Find closest camera to the moved object
+                                moved_x = obj["left"]
+                                moved_y = obj["top"]
+                                
+                                # Find the camera that was likely moved
+                                closest_camera = None
+                                min_distance = float('inf')
+                                
+                                for camera in st.session_state.cameras:
+                                    distance = math.sqrt((camera.x - moved_x)**2 + (camera.y - moved_y)**2)
+                                    if distance < min_distance:
+                                        min_distance = distance
+                                        closest_camera = camera
+                                
+                                if closest_camera and min_distance > 30:  # Only update if significantly moved
+                                    plotter.update_camera_position(closest_camera.id, moved_x, moved_y)
+                                    st.rerun()
             else:
                 st.info("💡 **Place Mode:** Set coordinates in the sidebar and click 'Place Camera' button.")
+                st.image(display_image, use_column_width=True)
         
         with col2:
             st.subheader("Camera Legend")
-            camera_types = ['PTZ', 'Dome', 'Bullet', 'Facial Recognition']
-            for cam_type in camera_types:
-                icon = plotter.get_camera_icon(cam_type)
-                st.write(f"{icon} {cam_type}")
+            
+            # Create mini images showing actual camera appearance
+            legend_size = 80
+            
+            for cam_type in ['PTZ', 'Dome', 'Bullet', 'Facial Recognition']:
+                style = plotter.get_camera_style(cam_type)
+                
+                # Create a small image showing the camera icon
+                legend_img = Image.new('RGBA', (legend_size, legend_size), (255, 255, 255, 0))
+                legend_draw = ImageDraw.Draw(legend_img)
+                
+                center_x, center_y = legend_size // 2, legend_size // 2
+                radius = 20
+                
+                # Draw the same shapes as on the main map
+                if cam_type == 'PTZ':
+                    legend_draw.ellipse(
+                        [center_x - radius, center_y - radius, center_x + radius, center_y + radius],
+                        fill=style['fill'], outline=style['outline'], width=2
+                    )
+                    legend_draw.line([(center_x-12, center_y), (center_x+12, center_y)], fill='white', width=2)
+                    legend_draw.line([(center_x, center_y-12), (center_x, center_y+12)], fill='white', width=2)
+                
+                elif cam_type == 'Dome':
+                    legend_draw.ellipse(
+                        [center_x - radius, center_y - radius, center_x + radius, center_y + radius],
+                        fill=style['fill'], outline=style['outline'], width=2
+                    )
+                    legend_draw.arc([center_x-15, center_y-15, center_x+15, center_y+15], 0, 180, fill='white', width=2)
+                    legend_draw.arc([center_x-8, center_y-8, center_x+8, center_y+8], 0, 180, fill='white', width=1)
+                
+                elif cam_type == 'Bullet':
+                    legend_draw.rectangle(
+                        [center_x - radius, center_y - radius//2, center_x + radius, center_y + radius//2],
+                        fill=style['fill'], outline=style['outline'], width=2
+                    )
+                    legend_draw.ellipse([center_x+5, center_y-5, center_x+15, center_y+5], fill='black', outline='white')
+                
+                else:  # Facial Recognition
+                    hex_points = []
+                    for i in range(6):
+                        angle = i * math.pi / 3
+                        hex_x = center_x + radius * math.cos(angle)
+                        hex_y = center_y + radius * math.sin(angle)
+                        hex_points.append((hex_x, hex_y))
+                    legend_draw.polygon(hex_points, fill=style['fill'], outline=style['outline'], width=2)
+                    legend_draw.ellipse([center_x-8, center_y-3, center_x+8, center_y+3], fill='white')
+                    legend_draw.ellipse([center_x-3, center_y-1, center_x+3, center_y+1], fill='black')
+                
+                # Display the legend item
+                col_icon, col_text = st.columns([1, 2])
+                with col_icon:
+                    st.image(legend_img, width=60)
+                with col_text:
+                    st.write(f"**{cam_type}**")
+                    st.caption(f"Color: {style['fill']}" if isinstance(style['fill'], str) else "Colored icon")
             
             # Export functionality
             st.divider()
