@@ -1,3 +1,4 @@
+# Camera Plotter App - Version 2.0 - Fixed TypeError
 import streamlit as st
 import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
@@ -9,7 +10,6 @@ import json
 import math
 import numpy as np
 from streamlit.components.v1 import html
-from components.drag_canvas import draggable_canvas
 
 @dataclass
 class Camera:
@@ -234,6 +234,7 @@ class CameraPlotter:
         return img_copy
 
 def main():
+    # VERSION 2.0 - Fixed TypeError - No component dependencies
     st.set_page_config(page_title="Camera Floor Plan Plotter", layout="wide")
     
     st.title("📹 Camera Floor Plan Plotter")
@@ -241,30 +242,7 @@ def main():
     
     plotter = CameraPlotter()
     
-    # Handle JavaScript communication for camera movement
-    if 'js_trigger' not in st.session_state:
-        st.session_state.js_trigger = 0
-    
-    # Check for camera selection/movement from JavaScript
-    if st.query_params.get('action') == 'select_camera':
-        camera_id = st.query_params.get('camera_id')
-        if camera_id:
-            st.session_state.selected_for_move = int(camera_id)
-            st.session_state.move_mode = 'place'
-            st.query_params.clear()
-            st.rerun()
-            
-    if st.query_params.get('action') == 'move_camera':
-        camera_id = st.query_params.get('camera_id')
-        new_x = st.query_params.get('x')
-        new_y = st.query_params.get('y')
-        if camera_id and new_x and new_y:
-            plotter.update_camera_position(int(camera_id), float(new_x), float(new_y))
-            st.session_state.selected_for_move = None
-            st.session_state.move_mode = 'select'
-            st.success(f"Camera moved to ({new_x}, {new_y})!")
-            st.query_params.clear()
-            st.rerun()
+    # Simple coordinate-based camera movement system
     
     # Sidebar for controls
     with st.sidebar:
@@ -307,10 +285,18 @@ def main():
         # Mode selection
         mode = st.radio(
             "Interaction Mode",
-            ["Place New Camera", "🎯 Real Drag & Drop"],
-            help="Choose whether to place new cameras or use true drag & drop to move them"
+            ["Place New Camera", "🎯 Click-to-Move Cameras"],
+            help="Choose whether to place new cameras or move existing ones"
         )
-        st.session_state.drag_mode = (mode == "🎯 Real Drag & Drop")
+        st.session_state.drag_mode = (mode == "🎯 Click-to-Move Cameras")
+        
+        if st.session_state.drag_mode:
+            st.info("💡 **How to move cameras:** Select a camera below, then click where you want it on the floor plan!")
+            
+            # Reset selection button
+            if st.session_state.selected_for_move and st.button("🔄 Clear Selection"):
+                st.session_state.selected_for_move = None
+                st.rerun()
         
         if not st.session_state.drag_mode:
             # Coordinates input for placing new cameras
@@ -335,56 +321,49 @@ def main():
         st.divider()
         
         # Camera list and management
-        st.subheader("Placed Cameras")
+        st.subheader("Camera Management")
         if st.session_state.cameras:
             for camera in st.session_state.cameras:
                 icon = plotter.get_camera_icon(camera.camera_type)
                 
-                # Special handling for drag mode
+                # Special handling for move mode
                 if st.session_state.drag_mode:
                     is_selected = st.session_state.selected_for_move == camera.id
                     
-                    if is_selected:
-                        st.success(f"✓ **SELECTED:** {icon} Camera #{camera.number} ({camera.camera_type})")
-                        st.caption(f"Position: ({int(camera.x)}, {int(camera.y)}) | Angle: {int(camera.angle)}°")
-                        
-                        # Quick actions for selected camera
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if st.button(f"Quick Move Camera #{camera.number}", key=f"quick_move_{camera.id}"):
-                                # Show coordinate inputs for quick movement
-                                new_x = st.number_input(f"New X for Camera #{camera.number}", value=int(camera.x), key=f"quick_x_{camera.id}")
-                                new_y = st.number_input(f"New Y for Camera #{camera.number}", value=int(camera.y), key=f"quick_y_{camera.id}")
-                                
-                                if st.button(f"Move to ({new_x}, {new_y})", key=f"confirm_move_{camera.id}"):
-                                    plotter.update_camera_position(camera.id, new_x, new_y)
-                                    st.success(f"Moved Camera #{camera.number}!")
+                    # Create a distinctive layout for each camera
+                    with st.container():
+                        if is_selected:
+                            st.success(f"✓ **SELECTED FOR MOVING**")
+                            col1, col2 = st.columns([2, 1])
+                            with col1:
+                                st.write(f"### {icon} Camera #{camera.number}")
+                                st.write(f"**Type:** {camera.camera_type}")
+                                st.write(f"**Current Position:** ({int(camera.x)}, {int(camera.y)})")
+                                st.write(f"**Direction:** {int(camera.angle)}°")
+                                st.info("Now click anywhere on the floor plan above to move this camera!")
+                            with col2:
+                                if st.button("❌ Deselect", key=f"deselect_{camera.id}", type="secondary"):
                                     st.session_state.selected_for_move = None
-                                    st.session_state.move_mode = 'select'
                                     st.rerun()
-                        with col2:
-                            if st.button("Deselect", key=f"deselect_{camera.id}"):
-                                st.session_state.selected_for_move = None
-                                st.session_state.move_mode = 'select'
-                                st.rerun()
-                    else:
-                        col1, col2 = st.columns([3, 1])
-                        with col1:
-                            st.write(f"{icon} Camera #{camera.number} ({camera.camera_type})")
-                            st.caption(f"Position: ({int(camera.x)}, {int(camera.y)}) | Angle: {int(camera.angle)}°")
-                        with col2:
-                            if st.button("Select", key=f"select_{camera.id}"):
-                                st.session_state.selected_for_move = camera.id
-                                st.session_state.move_mode = 'place'
-                                st.rerun()
+                        else:
+                            col1, col2 = st.columns([3, 1])
+                            with col1:
+                                st.write(f"**{icon} Camera #{camera.number}** ({camera.camera_type})")
+                                st.caption(f"Position: ({int(camera.x)}, {int(camera.y)}) | Direction: {int(camera.angle)}°")
+                            with col2:
+                                if st.button("🎯 Select to Move", key=f"select_{camera.id}", type="primary"):
+                                    st.session_state.selected_for_move = camera.id
+                                    st.rerun()
+                        
+                        st.divider()
                 else:
                     # Normal mode - full editor
-                    with st.expander(f"{icon} Camera #{camera.number} ({camera.camera_type})"):
+                    with st.expander(f"{icon} Camera #{camera.number} ({camera.camera_type})", expanded=False):
                         st.caption(f"Position: ({int(camera.x)}, {int(camera.y)})")
                         
                         # Angle editing
                         new_angle = st.slider(
-                            "Direction",
+                            "Camera Direction (degrees)",
                             min_value=0,
                             max_value=359,
                             value=int(camera.angle),
@@ -394,9 +373,9 @@ def main():
                         
                         col1, col2 = st.columns(2)
                         with col1:
-                            if st.button("Update Angle", key=f"update_{camera.id}"):
+                            if st.button("Update Direction", key=f"update_{camera.id}"):
                                 plotter.update_camera_angle(camera.id, new_angle)
-                                st.success(f"Updated camera #{camera.number} angle to {new_angle}°")
+                                st.success(f"Updated camera #{camera.number} direction to {new_angle}°")
                                 st.rerun()
                         
                         with col2:
@@ -404,7 +383,7 @@ def main():
                                 plotter.remove_camera(camera.id)
                                 st.rerun()
         else:
-            st.info("No cameras placed yet")
+            st.info("No cameras placed yet. Use 'Place New Camera' mode to add some!")
         
         # Clear all cameras and reset selection
         if st.session_state.cameras:
@@ -432,31 +411,86 @@ def main():
                 display_image = plotter.render_image_with_cameras(st.session_state.uploaded_image)
             
             if st.session_state.drag_mode:
-                st.info("🎆 **True Drag Mode:** Click and drag any camera to move it instantly!")
+                st.info("🎯 **Easy Move Mode:** Select a camera from the sidebar, then click where you want to move it!")
                 
-                # Use the custom draggable canvas component
-                drag_result = draggable_canvas(
-                    image=display_image,
-                    cameras=st.session_state.cameras,
-                    key="drag_canvas"
-                )
+                # Convert PIL image to base64 for HTML display
+                buffered = io.BytesIO()
+                display_image.save(buffered, format="PNG")
+                img_str = base64.b64encode(buffered.getvalue()).decode()
                 
-                # Handle drag results
-                if drag_result is not None and isinstance(drag_result, dict):
-                    if 'camera_id' in drag_result and 'x' in drag_result and 'y' in drag_result:
-                        camera_id = drag_result['camera_id']
-                        new_x = drag_result['x']
-                        new_y = drag_result['y']
+                # Simple click-to-move with session state
+                if 'click_coordinates' not in st.session_state:
+                    st.session_state.click_coordinates = None
+                
+                # Enhanced click detection with session state updates
+                html_code = f"""
+                <div style="position: relative; display: inline-block; border: 3px solid #4CAF50; border-radius: 15px; overflow: hidden; background: #f8f9fa; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                    <img id="floorplan" src="data:image/png;base64,{img_str}" 
+                         style="width: 100%; height: auto; display: block; cursor: crosshair;" 
+                         onclick="handleClick(event)" />
+                    <div id="feedback" style="position: absolute; top: 15px; left: 15px; background: rgba(76, 175, 80, 0.95); color: white; padding: 10px 15px; border-radius: 8px; font-size: 14px; font-weight: bold; display: none; z-index: 1000; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">Click detected!</div>
+                </div>
+                
+                <script>
+                function handleClick(event) {{
+                    const rect = event.target.getBoundingClientRect();
+                    const scaleX = event.target.naturalWidth / rect.width;
+                    const scaleY = event.target.naturalHeight / rect.height;
+                    const x = Math.round((event.clientX - rect.left) * scaleX);
+                    const y = Math.round((event.clientY - rect.top) * scaleY);
+                    
+                    // Show immediate feedback
+                    const feedback = document.getElementById('feedback');
+                    feedback.innerHTML = `🎯 Clicked at (${{x}}, ${{y}})`;
+                    feedback.style.display = 'block';
+                    setTimeout(() => feedback.style.display = 'none', 2000);
+                    
+                    // Update URL parameters to trigger Streamlit update
+                    const url = new URL(window.location);
+                    url.searchParams.set('click_x', x);
+                    url.searchParams.set('click_y', y);
+                    url.searchParams.set('click_time', Date.now());
+                    window.history.replaceState({{}}, '', url);
+                    
+                    // Force page refresh to trigger Streamlit update
+                    setTimeout(() => window.location.reload(), 100);
+                }}
+                </script>
+                """
+                
+                # Display the clickable image
+                html(html_code, height=500)
+                
+                # Check for click coordinates in URL params
+                click_x = st.query_params.get('click_x')
+                click_y = st.query_params.get('click_y')
+                
+                if click_x and click_y and st.session_state.selected_for_move:
+                    try:
+                        x_coord = float(click_x)
+                        y_coord = float(click_y)
                         
-                        # Update camera position
-                        plotter.update_camera_position(camera_id, new_x, new_y)
+                        # Move the selected camera
+                        plotter.update_camera_position(st.session_state.selected_for_move, x_coord, y_coord)
                         
                         # Find camera for success message
-                        moved_camera = next((c for c in st.session_state.cameras if c.id == camera_id), None)
+                        moved_camera = next((c for c in st.session_state.cameras if c.id == st.session_state.selected_for_move), None)
                         if moved_camera:
-                            st.success(f"✓ Moved Camera #{moved_camera.number} to ({new_x}, {new_y})!")
+                            st.success(f"✓ Moved Camera #{moved_camera.number} to ({int(x_coord)}, {int(y_coord)})!")
                         
+                        # Reset selection and clear URL params
+                        st.session_state.selected_for_move = None
+                        st.session_state.move_mode = 'select'
+                        st.query_params.clear()
                         st.rerun()
+                        
+                    except ValueError:
+                        st.error("Invalid coordinates received")
+                        st.query_params.clear()
+                
+                elif click_x and click_y and not st.session_state.selected_for_move:
+                    st.warning("Please select a camera from the sidebar first, then click where you want to move it!")
+                    st.query_params.clear()
                     
             else:
                 st.info("💡 **Place Mode:** Set coordinates in the sidebar and click 'Place Camera' button.")
