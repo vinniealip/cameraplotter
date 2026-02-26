@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import List, Optional
 import json
 import math
-from streamlit_image_coordinates import streamlit_image_coordinates
 
 @dataclass
 class Camera:
@@ -226,23 +225,17 @@ def main():
         st.session_state.drag_mode = (mode == "Move Existing Camera")
         
         if not st.session_state.drag_mode:
-            # Click coordinates input for placing new cameras
+            # Coordinates input for placing new cameras
             if 'click_x' not in st.session_state:
-                st.session_state.click_x = 0
+                st.session_state.click_x = 100
             if 'click_y' not in st.session_state:
-                st.session_state.click_y = 0
+                st.session_state.click_y = 100
                 
             col1, col2 = st.columns(2)
             with col1:
-                x_coord = st.number_input("X", value=st.session_state.click_x, key="x_input")
+                x_coord = st.number_input("X Position", value=st.session_state.click_x, key="x_input")
             with col2:
-                y_coord = st.number_input("Y", value=st.session_state.click_y, key="y_input")
-        else:
-            st.info("Click on a camera in the image to select and move it.")
-            if st.session_state.selected_camera_id:
-                selected_camera = next((c for c in st.session_state.cameras if c.id == st.session_state.selected_camera_id), None)
-                if selected_camera:
-                    st.success(f"Selected Camera #{selected_camera.number} - Click anywhere to move it")
+                y_coord = st.number_input("Y Position", value=st.session_state.click_y, key="y_input")
         
         if not st.session_state.drag_mode:
             if st.button("Place Camera", type="primary"):
@@ -293,11 +286,6 @@ def main():
                 st.session_state.selected_camera_id = None
                 st.rerun()
         
-        # Clear selection button for drag mode
-        if st.session_state.drag_mode and st.session_state.selected_camera_id:
-            if st.button("Cancel Selection"):
-                st.session_state.selected_camera_id = None
-                st.rerun()
     
     # Main image display area
     if st.session_state.uploaded_image is not None:
@@ -309,37 +297,48 @@ def main():
             # Render image with cameras
             display_image = plotter.render_image_with_cameras(st.session_state.uploaded_image)
             
-            # Display image with click handling using streamlit-image-coordinates
-            coords = streamlit_image_coordinates(display_image, key="image_coords")
+            # Display the image
+            st.image(display_image, use_column_width=True)
             
-            if coords is not None:
-                click_x, click_y = coords["x"], coords["y"]
-                
-                if st.session_state.drag_mode:
-                    # Move existing camera mode
-                    if st.session_state.selected_camera_id is None:
-                        # Select camera to move
-                        camera_id = plotter.find_camera_at_position(click_x, click_y)
-                        if camera_id:
-                            st.session_state.selected_camera_id = camera_id
-                            st.rerun()
-                    else:
-                        # Move selected camera to new position
-                        plotter.update_camera_position(st.session_state.selected_camera_id, click_x, click_y)
-                        st.session_state.selected_camera_id = None
-                        st.success("Camera moved!")
-                        st.rerun()
-                else:
-                    # Place new camera mode - update coordinates
-                    st.session_state.click_x = click_x
-                    st.session_state.click_y = click_y
-                    st.rerun()
-            
-            # Instructions
+            # Manual coordinate input for camera placement/movement
             if st.session_state.drag_mode:
-                st.info("💡 **Move Mode:** Click on a camera to select it, then click where you want to move it.")
+                st.info("💡 **Move Mode:** Select a camera from the list below, then set new coordinates and click 'Move Camera'.")
+                
+                if st.session_state.cameras:
+                    # Camera selection dropdown for moving
+                    camera_options = [(f"Camera #{cam.number} ({cam.camera_type})", cam.id) 
+                                    for cam in st.session_state.cameras]
+                    
+                    selected_option = st.selectbox(
+                        "Select Camera to Move",
+                        options=[opt[0] for opt in camera_options],
+                        key="camera_select"
+                    )
+                    
+                    if selected_option:
+                        selected_camera_id = next(opt[1] for opt in camera_options if opt[0] == selected_option)
+                        selected_camera = next(cam for cam in st.session_state.cameras if cam.id == selected_camera_id)
+                        
+                        col_x, col_y = st.columns(2)
+                        with col_x:
+                            new_x = st.number_input(
+                                "New X Position", 
+                                value=float(selected_camera.x),
+                                key="move_x"
+                            )
+                        with col_y:
+                            new_y = st.number_input(
+                                "New Y Position", 
+                                value=float(selected_camera.y),
+                                key="move_y"
+                            )
+                        
+                        if st.button("Move Camera", type="primary"):
+                            plotter.update_camera_position(selected_camera_id, new_x, new_y)
+                            st.success(f"Moved Camera #{selected_camera.number} to ({int(new_x)}, {int(new_y)})")
+                            st.rerun()
             else:
-                st.info("💡 **Place Mode:** Click on the image to set coordinates, then use 'Place Camera' button in sidebar.")
+                st.info("💡 **Place Mode:** Set coordinates in the sidebar and click 'Place Camera' button.")
         
         with col2:
             st.subheader("Camera Legend")
