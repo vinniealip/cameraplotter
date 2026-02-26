@@ -467,22 +467,30 @@ def main():
                         st.info(f"🎯 **Ready to move Camera #{selected_camera.number}**")
                         st.write(f"Current position: ({int(selected_camera.x)}, {int(selected_camera.y)})")
                         
+                        # Initialize coordinate values for this specific camera
+                        coord_key = f"move_coords_{st.session_state.selected_for_move}"
+                        if coord_key not in st.session_state:
+                            st.session_state[coord_key] = {
+                                'x': int(selected_camera.x),
+                                'y': int(selected_camera.y)
+                            }
+                        
                         col1, col2, col3 = st.columns([2, 2, 2])
                         
                         with col1:
                             new_x = st.number_input(
                                 "New X Position", 
-                                value=int(selected_camera.x),
+                                value=st.session_state[coord_key]['x'],
                                 min_value=0,
-                                key="move_x_input"
+                                key=f"move_x_input_{st.session_state.selected_for_move}"
                             )
                         
                         with col2:
                             new_y = st.number_input(
                                 "New Y Position", 
-                                value=int(selected_camera.y),
+                                value=st.session_state[coord_key]['y'],
                                 min_value=0,
-                                key="move_y_input"
+                                key=f"move_y_input_{st.session_state.selected_for_move}"
                             )
                         
                         with col3:
@@ -508,8 +516,11 @@ def main():
                                 clicked_y = st.query_params.get('click_y')
                                 
                                 if clicked_x and clicked_y:
-                                    st.session_state.auto_fill_x = int(float(clicked_x))
-                                    st.session_state.auto_fill_y = int(float(clicked_y))
+                                    coord_key = f"move_coords_{st.session_state.selected_for_move}"
+                                    st.session_state[coord_key] = {
+                                        'x': int(float(clicked_x)),
+                                        'y': int(float(clicked_y))
+                                    }
                                     st.success(f"✓ Updated coordinates to ({clicked_x}, {clicked_y})!")
                                     st.query_params.clear()  # Clear after using
                                     st.rerun()
@@ -518,8 +529,11 @@ def main():
                         
                         with col_update2:
                             if st.button("📍 Reset to Current Position", help="Reset coordinates to camera's current position"):
-                                st.session_state.auto_fill_x = int(selected_camera.x)
-                                st.session_state.auto_fill_y = int(selected_camera.y)
+                                coord_key = f"move_coords_{st.session_state.selected_for_move}"
+                                st.session_state[coord_key] = {
+                                    'x': int(selected_camera.x),
+                                    'y': int(selected_camera.y)
+                                }
                                 st.rerun()
                         
                         st.info("💡 **How to use:** 1) Click anywhere on the floor plan, 2) Click 'Use Last Clicked Position', 3) Click 'Move Camera Here!'")
