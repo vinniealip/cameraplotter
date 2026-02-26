@@ -460,51 +460,50 @@ def main():
                 # Display the clickable image
                 html(html_code, height=500)
                 
-                # Check for click coordinates in URL params
-                click_x = st.query_params.get('click_x')
-                click_y = st.query_params.get('click_y')
+                # Simple Save Button Approach
+                st.subheader("🎯 Move Camera Controls")
                 
-                # Debug information
-                if click_x and click_y:
-                    st.info(f"Debug: Detected click at ({click_x}, {click_y}). Selected camera: {st.session_state.selected_for_move}")
+                if st.session_state.selected_for_move:
+                    selected_camera = next((c for c in st.session_state.cameras if c.id == st.session_state.selected_for_move), None)
+                    if selected_camera:
+                        st.info(f"🎯 **Ready to move Camera #{selected_camera.number}**")
+                        st.write(f"Current position: ({int(selected_camera.x)}, {int(selected_camera.y)})")
+                        
+                        col1, col2, col3 = st.columns([2, 2, 2])
+                        
+                        with col1:
+                            new_x = st.number_input(
+                                "New X Position", 
+                                value=int(selected_camera.x),
+                                min_value=0,
+                                key="move_x_input"
+                            )
+                        
+                        with col2:
+                            new_y = st.number_input(
+                                "New Y Position", 
+                                value=int(selected_camera.y),
+                                min_value=0,
+                                key="move_y_input"
+                            )
+                        
+                        with col3:
+                            st.write("")
+                            st.write("")
+                            if st.button("🎯 Move Camera Here!", type="primary", key="move_camera_btn"):
+                                # Move the camera
+                                plotter.update_camera_position(st.session_state.selected_for_move, new_x, new_y)
+                                st.success(f"✓ Moved Camera #{selected_camera.number} to ({new_x}, {new_y})!")
+                                
+                                # Reset selection
+                                st.session_state.selected_for_move = None
+                                st.rerun()
+                        
+                        st.markdown("---")
+                        st.info("💡 **Tip:** You can manually type coordinates above, or click on the floor plan to auto-fill them (coming soon!)")
                 
-                if click_x and click_y and st.session_state.selected_for_move:
-                    try:
-                        x_coord = float(click_x)
-                        y_coord = float(click_y)
-                        camera_id = st.session_state.selected_for_move
-                        
-                        st.info(f"Debug: Attempting to move camera {camera_id} to ({x_coord}, {y_coord})")
-                        
-                        # Find the camera before moving it
-                        camera_to_move = next((c for c in st.session_state.cameras if c.id == camera_id), None)
-                        if camera_to_move:
-                            st.info(f"Debug: Found camera #{camera_to_move.number} at current position ({camera_to_move.x}, {camera_to_move.y})")
-                            
-                            # Move the selected camera
-                            plotter.update_camera_position(camera_id, x_coord, y_coord)
-                            
-                            # Check if it actually moved
-                            updated_camera = next((c for c in st.session_state.cameras if c.id == camera_id), None)
-                            if updated_camera:
-                                st.success(f"✓ Camera #{updated_camera.number} moved from ({int(camera_to_move.x)}, {int(camera_to_move.y)}) to ({int(updated_camera.x)}, {int(updated_camera.y)})!")
-                            else:
-                                st.error("Camera not found after move attempt")
-                        else:
-                            st.error(f"Camera with ID {camera_id} not found")
-                        
-                        # Reset selection and clear URL params
-                        st.session_state.selected_for_move = None
-                        st.query_params.clear()
-                        st.rerun()
-                        
-                    except ValueError as e:
-                        st.error(f"Invalid coordinates received: {e}")
-                        st.query_params.clear()
-                
-                elif click_x and click_y and not st.session_state.selected_for_move:
-                    st.warning("Please select a camera from the sidebar first, then click where you want to move it!")
-                    st.query_params.clear()
+                else:
+                    st.warning("👆 Please select a camera from the sidebar first!")
                     
             else:
                 st.info("💡 **Place Mode:** Set coordinates in the sidebar and click 'Place Camera' button.")
